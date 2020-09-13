@@ -10,6 +10,19 @@ from utils import update_json
 from control import stop_recording
 from recording import start_game, start_recording
 
+MOUSE_BUTTON_MAP = {
+    513: 1, 514: 1,
+    516: 2, 517: 2,
+    519: 4, 520: 4,
+    523: {1: 8, 2: 16}, 524: {1: 8, 2: 16},
+    522: 32  # Wheel, additional winput fn for this
+}  # defined by winput. See https://github.com/Zuzu-Typ/winput#sending-mouse-input
+MOUSE_RELEASE_CODES = [514, 517, 520, 524]
+MOUSE_PRESS_CODES = [513, 516, 519, 523]
+MOUSE_WHEEL_CODE = 522
+MOUSE_MOVEMENT_CODE = 512
+KEY_PRESS = 256
+KEY_RELEASE = 257
 
 KEY_DIR = path.expanduser("~/IdeaProjects/ILDataCollector/data/keylogs/")
 MOUSE_DIR = path.expanduser("~/IdeaProjects/ILDataCollector/data/mouselogs/")
