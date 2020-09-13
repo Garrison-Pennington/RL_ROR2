@@ -3,12 +3,9 @@ import math
 import itertools
 from io import BytesIO
 from pathlib import Path
-import itertools
 
 import imageio
 import numpy as np
-import matplotlib.pyplot as plt
-
 from torch.utils.data import Dataset
 
 from loggers import *
