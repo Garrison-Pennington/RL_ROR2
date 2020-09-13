@@ -33,13 +33,13 @@ start = time.time()
 dt = date.today()
 dt = f"{dt.year}{dt.month}{dt.day}"
 
-i = 0
-while path.exists(KEY_DIR + dt + f"_{i}.log"):
-    i += 1
+sessions_today = 0
+while path.exists(KEY_DIR + dt + f"_{sessions_today}.log"):
+    sessions_today += 1
 
-key_logfile = KEY_DIR + dt + f"_{i}.log"
-mouse_logfile = MOUSE_DIR + dt + f"_{i}.log"
-session_file = SESSION_DIR + dt + f"_{i}.json"
+key_logfile = KEY_DIR + dt + f"_{sessions_today}.log"
+mouse_logfile = MOUSE_DIR + dt + f"_{sessions_today}.log"
+session_file = SESSION_DIR + dt + f"_{sessions_today}.json"
 
 
 def exit_handler():
