@@ -75,7 +75,7 @@ def on_mouse_event(event):
     return 1
 
 
-def start_logging():
+def start_logging(game):
     global start
     start = time.time()
     # log start time
@@ -84,8 +84,8 @@ def start_logging():
     # set the hook
     hook_keyboard(on_keyboard_event)
     hook_mouse(on_mouse_event)
-    start_game("Risk of Rain 2")
-    update_json(session_file, {"game start": time.time()})
+    start_game(game)
+    update_json(session_file, {"game start": time.time(), "game": game})
     start_recording()
     update_json(session_file, {"recording start": time.time()})
     # set exit handler to log session data
