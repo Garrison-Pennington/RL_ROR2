@@ -12,5 +12,5 @@ def update_json(file, data):
 
 
 def time_list(secs=None):
-    t_inf = time.gmtime() if secs is None else time.gmtime(secs)
+    t_inf = time.localtime() if secs is None else time.localtime(secs)
     return [t_inf[3], t_inf[4], t_inf[5]]
