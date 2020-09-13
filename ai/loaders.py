@@ -41,11 +41,12 @@ class RawVideo(Dataset):
 
 class Frames(Dataset):
 
-    def __init__(self, video):
+    def __init__(self, video, metadata):
         self.video = video
+        self.metadata = metadata
 
     def __len__(self):
-        return len([1 for _, _ in enumerate(self.video)])
+        return self.metadata["nframes"]
 
     def __getitem__(self, item):
         return np.array(next(itertools.islice(self.video, item, None))).astype(np.float32) / 255
