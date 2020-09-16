@@ -96,30 +96,28 @@ class Actions(Dataset):
                 best = name
         return best
 
-    def key_log_to_frame_states(self, log, video_filename):
+    def key_log_to_frame_states(self, log):
         # Divide action states into frames
-        rs = time_list_from_video_name(video_filename)
-        rs = time.mktime(time.strptime(f"{rs[0]}:{rs[1]}:{rs[2]}", "%H:%M:%S"))
-        offset = rs - self.session["input start"]  # Delay (sec) between beginning of input log and beginning of video
+        offset = self.session["recording start"] - self.session["input start"]  # Delay (sec) between beginning of input log and beginning of video
         step = 1 / self.fps # time in seconds one frame fills
-        log = [l.split(">") for l in log]  # N x (time, event)
-        # N x [time, keycode, eventcode]
-        log = [[float(intm.strip()) - offset, *[int(x) for x in ev.strip().split(" ")]] for intm, ev in log]
-        log = [[int(intm / step), key, ev] for intm, key, ev in log]
-        active_keys = held_keys = []
+        active_keys = set()
+        held_keys = []
         current_frame = log[0][0]
-        frames = self.frames
-        for frm, key, ev in log:
+        frames = [[]] * int(self.nframes)
+        for i in range(len(log)):
+            frm, ev = log[i].split(">")
+            frm = int((float(frm) - offset) / step)
+            key, ev = [int(x) for x in ev.strip().split(" ")]
             if frm >= self.nframes:
                 print("More input frames than video frames, something is wrong")
                 break
             if frm > current_frame:  # Have we advanced to another frame?
-                frames[current_frame] = active_keys  # Record the currently pressed keys
+                frames[current_frame] = list(active_keys)  # Record the currently pressed keys
                 current_frame = frm  # Move the current frame forward
-                active_keys = held_keys
+                active_keys = set(held_keys)
             if ev == KEY_PRESS:
                 if key not in active_keys:
-                    active_keys.append(key)
+                    active_keys.add(key)
                 if key not in held_keys:
                     held_keys.append(key)
             if ev == KEY_RELEASE and key in active_keys:
