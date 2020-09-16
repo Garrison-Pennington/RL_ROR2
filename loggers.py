@@ -1,4 +1,4 @@
-from os import path
+from os import path, listdir
 import time
 from datetime import date
 import atexit
@@ -6,7 +6,7 @@ import json
 
 from winput import hook_mouse, hook_keyboard, wait_messages, stop, unhook_mouse, unhook_keyboard, winput
 
-from utils import update_json
+from utils import update_json, time_list
 from control import stop_recording
 from recording import start_game, start_recording
 
@@ -90,7 +90,7 @@ def start_logging(game):
     start_game(game)
     update_json(session_file, {"game start": time.time(), "game": game})
     start_recording()
-    update_json(session_file, {"recording start": time.time()})
+    update_json(session_file, {"recording start": get_obs_log_time()})
     # set exit handler to log session data
     print("registering exit handler")
     atexit.register(exit_handler)
@@ -98,4 +98,23 @@ def start_logging(game):
     wait_messages()
 
 
-start_logging()
+def get_obs_log_time():
+    log_dir = path.expanduser("~/AppData/Roaming/obs-studio/logs")
+    files = listdir(log_dir)
+    files = list(filter(lambda nm: nm[:10].replace("-", "") == dt, files))
+    times = list(map(lambda nm: [int(el) for el in nm[11:21].split("-")], files))
+    t = time_list()
+    times = list(map(lambda tl: tl[0] - t[0] * (60 * 60) + tl[1] - t[1] * 60 + tl[2] - t[2], times))
+    idx = times.index(min(times))
+    rec_time = ""
+    while not rec_time:
+        with open(files[idx], "r") as f:
+            lines = f.readlines()
+            target = filter(lambda txt: "Recording Start" in txt, lines)
+            if target:
+                rec_time = target[:12]
+            else:
+                time.sleep(.5)
+    ms = int(rec_time[-3:]) / 1000
+    ts = time.mktime(time.strptime(f"{dt}-{rec_time[:-4]}", "%Y%m%d-%H:%M:%S")) + ms
+    return ts
