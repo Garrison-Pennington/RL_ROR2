@@ -75,7 +75,7 @@ class Actions(Dataset):
         return self.nframes
 
     def __getitem__(self, item):
-        return 0
+        return self.keys[item], self.mouse[item]
 
     def match_log_to_video(self):
         """
