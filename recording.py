@@ -12,7 +12,7 @@ STEAM_DIR = Path("D:/Games/Steam/")
 
 def start_recording():
     os.chdir(OBS_DIR)
-    subprocess.Popen(["obs64.exe", "--startrecording", "--always-on-top"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    subprocess.Popen(["obs64.exe", "--startrecording", "--always-on-top"])
 
 
 def start_game(game_name):
