@@ -124,7 +124,7 @@ class Actions(Dataset):
                 held_keys.remove(key)
         return frames
 
-    def mouse_log_to_frame_states(self, log, video_filename):
+    def mouse_log_to_frame_states(self, log):
         """
         Convert a mouse input log to a list of mouse states in each video frame. The mouse state is defined as the
         mouse's position in that frame, and list of all currently pressed mouse buttons in that frame.
@@ -145,22 +145,19 @@ class Actions(Dataset):
         9. Avg. MOV - event code = 512 = 0x0200
 
         :param log:  List of lines of mouse input log
-        :param video_filename:  Name of corresponding video file
         :return:
         """
         tier_map = [*MOUSE_PRESS_CODES, *MOUSE_RELEASE_CODES, MOUSE_WHEEL_CODE, MOUSE_MOVEMENT_CODE]
         # Divide action states into frames
-        rs = time_list_from_video_name(video_filename)
-        rs = time.mktime(time.strptime(f"{rs[0]}:{rs[1]}:{rs[2]}", "%H:%M:%S"))
-        offset = rs - self.session["input start"]  # Delay (sec) between beginning of input log and beginning of video
-        step = 1 / self.fps # time in seconds one frame fills
-        frames = self.frames
+        offset = self.session["recording start"] - self.session["input start"]  # Delay (sec) between beginning of input log and beginning of video
+        step = 1 / self.fps  # time in seconds one frame fills
+        frames = [[]] * int(self.nframes)
         for i in range(len(log)):
             time_stamp, event_code, position, additional_data = log[i].split(">")
             frame = int((float(time_stamp) - offset) / step)
             event_code = int(event_code)
             position = [int(x) for x in position[1:-1].split(",")]
-            additional_data = int(additional_data[1:-2]) if additional_data[1:-2] else None
+            additional_data = int(additional_data[1:-3]) if additional_data[1:-3] else None
             log[i] = frame, event_code, position, additional_data
         # Frame by frame, identify matching input entries and produce a frame input state
         active_buttons = set()
@@ -174,7 +171,7 @@ class Actions(Dataset):
             keys = []
             for k_p, g_p in ev_groupby:  # k = ev_code, g = input data of events
                 keys.append(int(k_p))
-                groups.append(g_p)
+                groups.append(list(g_p))
             tiers = list(map(lambda e: tier_map.index(e), keys))
             grp = list(map(lambda idx: groups[idx], [i for i, x in enumerate(keys) if x == tier_map[min(tiers)]]))
             grp = [item for sub in grp for item in sub]
@@ -188,16 +185,18 @@ class Actions(Dataset):
                 if ev == 522:  # Is it the wheel?
                     wheel_shift += sum(list(map(lambda inp: inp[-1], groups[i])))
                     continue
+                elif ev == 512:
+                    continue
                 button = MOUSE_BUTTON_MAP[ev]
                 if isinstance(button, dict):  # Is it an extra button?
-                    button = button[next(groups[i])[-1]]
-                press = ev in MOUSE_PRESS_CODES
-                if press:
+                    button = button[groups[i][0][-1]]
+                if ev in MOUSE_PRESS_CODES:
                     active_buttons.add(button)
                     if button not in held_buttons:
                         held_buttons.append(button)
                 else:
-                    held_buttons.remove(button)
+                    if button in held_buttons:
+                        held_buttons.remove(button)
             frames[k] = [list(active_buttons), position, wheel_shift]
             active_buttons = set(held_buttons)
             wheel_shift = 0
