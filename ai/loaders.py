@@ -81,7 +81,7 @@ class Actions(Dataset):
         """
         Find the .mkv file corresponding to the recording session
 
-        :return: filename of the video  Ex: 20200912_19;04;56_-7.mkv
+        :return: filename of the video  Ex: 20200912_19;04;56.mkv
         """
         record_start = self.session["recording start"]
         stamp = time_list(record_start)
@@ -89,7 +89,7 @@ class Actions(Dataset):
         min_diff = math.inf
         names = list(filter(lambda s: s.split("_")[0] == self.session_stamp[:-2], os.listdir(VID_DIR)))
         for name in names:
-            vid_ts = name.split("_")[1].split(";")
+            vid_ts = name[:-4].split("_")[1].split(";")
             diff = [abs(int(vid_ts[e]) - stamp[e]) for e in range(3)]
             diff = (diff[0] * (60 * 60)) + (diff[1] * 60) + diff[2]
             if diff < min_diff:
