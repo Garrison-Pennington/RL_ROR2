@@ -31,7 +31,10 @@ SESSION_DIR = path.expanduser("~/IdeaProjects/ILDataCollector/data/sessions/")
 start = time.time()
 
 dt = date.today()
-dt = f"{dt.year}{dt.month}{dt.day}"
+m = dt.month if len(str(dt.month)) == 2 else f"0{dt.month}"
+d = dt.day if len(str(dt.day)) == 2 else f"0{dt.day}"
+dt = f"{dt.year}{m}{d}"
+del m, d
 
 sessions_today = 0
 while path.exists(KEY_DIR + dt + f"_{sessions_today}.log"):
