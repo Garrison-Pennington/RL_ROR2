@@ -55,25 +55,24 @@ class Frames(Dataset):
 class Actions(Dataset):
 
     def __init__(self, session_stamp):
-        with open(KEY_DIR + session_stamp + ".log", "r") as f:
+        with open(Path(KEY_DIR + session_stamp + ".log"), "r") as f:
             self.keys = f.readlines()
-        with open(MOUSE_DIR + session_stamp + ".log", "r") as f:
+        with open(Path(MOUSE_DIR + session_stamp + ".log"), "r") as f:
             self.mouse = f.readlines()
-        with open(SESSION_DIR + session_stamp + ".json", "r") as f:
+        with open(Path(SESSION_DIR + session_stamp + ".json"), "r") as f:
             self.session = json.load(f)
         self.session_stamp = session_stamp
         # Find and load the matching video metadata
-        filename = self.match_log_to_video()
-        _, metadata = RawVideo.load_video(VID_DIR + filename)
-        self.nframes = metadata['nframes']
-        self.frames = [[] for _ in range(self.nframes)]
+        _, metadata = RawVideo.load_video(VID_DIR.joinpath(self.match_log_to_video()))
+        self.nframes = math.ceil(metadata['duration'] * metadata['fps'])
+        self.frames = [[]] * int(self.nframes)
         self.fps = metadata['fps']
         # Convert lines of (time, key, event) to list of Frame x key
-        self.keys = self.key_log_to_frame_states(self.keys, filename)
-        self.mouse = self.mouse_log_to_frame_states(self.mouse, filename)
+        self.keys = self.key_log_to_frame_states(self.keys)
+        self.mouse = self.mouse_log_to_frame_states(self.mouse)
 
     def __len__(self):
-        return len(self.frames)
+        return self.nframes
 
     def __getitem__(self, item):
         return 0
