@@ -9,7 +9,7 @@ import numpy as np
 from torch.utils.data import Dataset
 
 from loggers import *
-from utils import time_list, time_list_from_video_name
+from utils import time_list
 
 VID_DIR = Path("C:/Users/garri/IdeaProjects/ILDataCollector/data/video/")
 
