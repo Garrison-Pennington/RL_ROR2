@@ -1,5 +1,7 @@
 import json
 import time
+from os import path
+from functools import reduce
 
 
 def update_json(file, data):
@@ -19,3 +21,26 @@ def time_list(secs=None):
 def time_list_from_video_name(filename):
     t = filename.split("_")[1].split(";")
     return [int(e) for e in t]
+
+
+def compose(*funcs):
+    """Compose arbitrarily many functions, evaluated left to right.
+    Reference: https://mathieularose.com/function-composition-in-python/
+    """
+    # return lambda x: reduce(lambda v, f: f(v), funcs, x)
+    if funcs:
+        return reduce(lambda f, g: lambda *a, **kw: g(f(*a, **kw)), funcs)
+    else:
+        raise ValueError('Composition of empty sequence not supported.')
+
+
+def index_model_layers():
+    with open(path.expanduser("~/model_summary.txt"), "r+") as f:
+        lines = f.readlines()
+    idx = 0
+    for i in range(len(lines[4:])):
+        if lines[i + 4][0] not in " _=":
+            lines[i + 4] = f"{idx}: {lines[i+4]}"
+            idx += 1
+    with open(path.expanduser("~/model_summary.txt"), "w+") as f:
+        f.writelines(lines)
