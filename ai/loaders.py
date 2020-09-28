@@ -3,18 +3,21 @@ import math
 import itertools
 from io import BytesIO
 from pathlib import Path
+from collections import defaultdict
+from functools import reduce
 
 import imageio
 import numpy as np
-from torch.utils.data import Dataset
+from tensorflow.keras.utils import Sequence
 
 from loggers import *
 from utils import time_list
 
 VID_DIR = Path("C:/Users/garri/IdeaProjects/ILDataCollector/data/video/")
+DETECT_DIR = Path("C:/Users/garri/data/ROR2/vott-json-export/")
 
 
-class RawVideo(Dataset):
+class RawVideo:
 
     @classmethod
     def load_video(cls, filepath):
@@ -39,7 +42,7 @@ class RawVideo(Dataset):
         }
 
 
-class Frames(Dataset):
+class Frames:
 
     def __init__(self, video, metadata):
         self.video = video
@@ -52,7 +55,7 @@ class Frames(Dataset):
         return np.array(next(itertools.islice(self.video, item, None))).astype(np.float32) / 255
 
 
-class Actions(Dataset):
+class Actions:
 
     def __init__(self, session_stamp):
         with open(Path(KEY_DIR + session_stamp + ".log"), "r") as f:
