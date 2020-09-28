@@ -204,3 +204,115 @@ class Actions:
             active_buttons = set(held_buttons)
             wheel_shift = 0
         return frames
+
+
+class TaggedFrames(Sequence):
+    """
+    Dataset of images with localized object classifications
+
+    Data: H x W x 3 numpy array of a jpg image (float32)
+    Label: Object x (x, y, w, h, o, c0-cN) numpy array (float32)
+    """
+
+    def json_to_sample(self, sample):
+        asset = sample["asset"]
+        data = np.asarray(*imageio.read(DETECT_DIR.joinpath(asset["name"]))).astype(np.float32) / 255
+        labels = sample["regions"]
+        bboxes, tags = zip(*[(b["boundingBox"], b["tags"]) for b in labels])
+        bboxes = np.array([np.array([
+            b["left"]+b["width"]/2,  # x
+            b["top"]+b["height"]/2,  # y
+            b["width"],              # w
+            b["height"],             # h
+            1                        # o
+        ]) for b in bboxes])
+        tags = list(map(lambda lot: [self.class_labels.index(t) for t in lot], tags))
+        tag_arr = np.zeros((len(tags), len(self.class_labels))).astype(np.float32)
+        for obj in range(len(tags)):
+            for t in tags[obj]:
+                tag_arr[obj][t] = 1
+        label = np.concatenate((bboxes, tag_arr), axis=1)
+        return data, label
+
+    def __init__(self):
+        with open(DETECT_DIR.joinpath("ROR2-Annotations-export.json")) as f:
+            annotations = json.load(f)
+        self.class_labels = [a["name"] for a in annotations["tags"]]
+        self.samples = list(map(lambda k: self.json_to_sample(annotations["assets"][k]), annotations["assets"]))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, item):
+        return self.samples[item]
+
+
+def join_boxes(*boxes, cell_shape, image_shape):
+    if len(boxes) == 1:
+        (x, y, w, h, _), classes = boxes[0][:5], boxes[0][5:]
+        minx, miny, maxx, maxy = x - w/2, y - h/2, x + w/2, y + h/2
+        classes = np.array(classes)
+    else:
+        xs, ys, ws, hs, o, *classes = tuple(zip(*boxes))
+        bounds = list(zip(*[(
+            xs[i] - ws[i]/2,
+            ys[i] - hs[i]/2,
+            xs[i] + ws[i]/2,
+            ys[i] + hs[i]/2
+        ) for i in range(len(xs))]))
+        (minx, miny), (maxx, maxy) = tuple(map(min, bounds[:2])), tuple((map(max, bounds[2:])))
+        classes = list(zip(*classes))
+        classes = reduce(np.logical_or, classes)
+    (cell_height, cell_width), (image_height, image_width) = cell_shape, image_shape
+    w, h = (maxx - minx)/image_width, (maxy - miny)/image_height
+    (x, _), (y, _) = math.modf(((minx + maxx)/2)/cell_width), \
+                     math.modf(((miny + maxy)/2)/cell_height)
+    return np.array([x, y, w, h, 1, *classes])
+
+
+class YoloFrames(Sequence):
+
+    def __init__(self, out_grids, num_boxes, batch_size):
+        self.dataset = TaggedFrames()
+        self.cell_shape = (5 + len(self.dataset.class_labels)) * num_boxes
+        self.out_grids = [np.zeros((*shp, self.cell_shape)) for shp in out_grids]
+        self.num_boxes = num_boxes
+        self.batch_size = batch_size
+
+    def __len__(self):
+        return math.ceil(len(self.dataset) / self.batch_size)
+
+    def __getitem__(self, idx):
+        data, labels = list(zip(*[self.dataset[i] for i in range(idx * self.batch_size, (idx + 1) * self.batch_size)]))
+        image_height, image_width, _ = data[0].shape
+        labels = list(labels)
+        for i in range(len(labels)):
+            l = labels[i]
+            label = []
+            for tmp in self.out_grids:
+                visited = defaultdict(list)
+                arr = tmp.copy()
+                y_cells, x_cells, _ = arr.shape
+                cell_height, cell_width = image_height/y_cells, image_width/x_cells
+                for obj in range(len(l)):
+                    (x, y, w, h) = l[obj, :4]
+                    (_, cx), (_, cy) = math.modf(x / cell_width), math.modf(y / cell_height)
+                    visited[int(cy), int(cx)].append(l[obj])
+                for k in visited:
+                    tmp = join_boxes(*visited[k], cell_shape=(cell_height, cell_width), image_shape=(image_height, image_width))
+                    arr[k] = np.concatenate([tmp for _ in range(self.num_boxes)])
+                label.append(arr.reshape((1, *arr.shape)))
+            labels[i] = label
+        data = np.array(data).reshape((self.batch_size, image_height, image_width, 3))
+        labels = list(zip(*labels))
+        return data, labels
+
+    # def __iter__(self):
+    #     return self
+    #
+    # def __next__(self):
+    #     if self.i == len(self):
+    #         raise StopIteration
+    #     item = self[self.i]
+    #     self.i += 1
+    #     return item
