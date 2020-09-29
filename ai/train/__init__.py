@@ -1,7 +1,4 @@
-import sys
-
 import tensorflow as tf
-import tensorflow.keras.backend as kb
 
 
 def logit(x):
@@ -69,6 +66,41 @@ def yolo_loss(num_boxes=2, ignore_threshold=.5, localization_weight=5, no_obj_we
         return tf.reduce_sum([anchor_loss, shape_loss, object_loss, no_object_loss, class_loss])
 
     return inner
+
+
+def features_to_bboxes(y, anchors, num_classes):
+    """
+
+    :param y: batch x H x W x (5 + num_classes) * num_boxes
+    :param anchors: num_boxes x (w, h)
+    :param num_classes:
+    :return:
+    """
+
+    num_boxes = len(anchors)
+    conv_shape = tf.shape(y)
+    batch_size = conv_shape[0]
+    out_h, out_w = conv_shape[1:3]
+
+    y = tf.reshape(y, (batch_size, out_h, out_w, num_boxes, 5 + num_classes))
+
+    xy, wh, o, c = tf.split(y, [2, 2, 1, num_classes], axis=-1)  # batch x H x W x box x (2, 2, 1, num_classes)
+
+    grid = tf.tile(idx_tensor((out_h, out_w))[tf.newaxis, :, :, tf.newaxis, :], [batch_size, 1, 1, num_boxes, 1])
+
+    xy = tf.sigmoid(xy) + grid
+    wh = tf.exp(wh) * anchors
+
+    o = tf.sigmoid(o)
+    c = tf.sigmoid(c)
+
+    return tf.concat([xy, wh, o, c], axis=-1)  # batch x H x W x box x (5 + num_classes)
+
+
+def idx_tensor(shape):
+    y = tf.tile(tf.range(shape[0], dtype=tf.int32)[:, tf.newaxis], [1, shape[1]])
+    x = tf.tile(tf.range(shape[1], dtype=tf.int32)[tf.newaxis, :], [shape[0], 1])
+    return tf.concat([x[:, :, tf.newaxis], y[:, :, tf.newaxis]], axis=-1)
 
 
 def yolo_bbox(arr, shape):
