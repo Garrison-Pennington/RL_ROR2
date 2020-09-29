@@ -1,7 +1,6 @@
 from os import path
 
 import tensorflow as tf
-import tensorflow.keras.optimizers as optim
 
 from ai.loaders import YoloFrames
 from ai.network import YOLOv3
@@ -16,13 +15,19 @@ model = net.compile_model(
 out_grids = [(o.shape[1], o.shape[2]) for o in model.outputs]
 training_data = YoloFrames(out_grids, 2, 1)
 t = training_data[0]
-# print(t[0].shape, t[1][0].shape)
 
+cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=path.expanduser("~/models/ror2_yolov3_v1"),
+                                                 save_weights_only=True,
+                                                 verbose=1)
 
-model.fit(
-    training_data,
-    epochs=10,
-    verbose=2
-)
-
-model.save(path.expanduser("~/models/ror2_yolov3_v1.pth"))
+try:
+    model.fit(
+        training_data,
+        epochs=100,
+        verbose=1,
+        callbacks=[cp_callback]
+    )
+except KeyboardInterrupt:
+    model.save(path.expanduser("~/models/ror2_yolov3_v1"))
+else:
+    model.save(path.expanduser("~/models/ror2_yolov3_v1"))

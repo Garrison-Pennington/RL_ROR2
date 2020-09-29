@@ -65,7 +65,7 @@ def yolo_loss(num_boxes=2, ignore_threshold=.5, localization_weight=5, no_obj_we
             )
         )
         class_loss = tf.reduce_sum(tf.multiply(bce()(true_classes, pred_classes), obj_mask))
-        tf.print(anchor_loss, shape_loss, object_loss, no_object_loss, class_loss, output_stream=sys.stdout)
+        # tf.print(anchor_loss, shape_loss, object_loss, no_object_loss, class_loss, output_stream=sys.stdout)
         return tf.reduce_sum([anchor_loss, shape_loss, object_loss, no_object_loss, class_loss])
 
     return inner
@@ -84,7 +84,7 @@ def yolo_bbox(arr, shape):
     x, y, w, h = arr[..., 0], arr[..., 1], arr[..., 2], arr[..., 3]
     w *= im_width
     h *= im_height
-    c_idx = tf.repeat(tf.expand_dims(tf.range(im_width, dtype=tf.float32), axis=0), [im_height], axis=0),
+    c_idx = tf.repeat(tf.expand_dims(tf.range(im_width, dtype=tf.float32), axis=0), [im_height], axis=0)
     r_idx = tf.transpose(
         tf.repeat(tf.expand_dims(tf.range(im_height, dtype=tf.float32), axis=0), [im_width], axis=0),
         perm=[1, 0])
