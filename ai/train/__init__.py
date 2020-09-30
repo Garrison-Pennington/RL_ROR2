@@ -1,9 +1,6 @@
 import tensorflow as tf
 
-
-def logit(x):
-    """ Computes the logit function, i.e. the logistic sigmoid inverse. """
-    return -tf.math.log(1. / x - 1.)
+from utils.ai import idx_tensor
 
 
 def mse(y_true, y_pred):
@@ -95,12 +92,6 @@ def features_to_bboxes(y, anchors, num_classes):
     c = tf.sigmoid(c)
 
     return tf.concat([xy, wh, o, c], axis=-1)  # batch x H x W x box x (5 + num_classes)
-
-
-def idx_tensor(shape):
-    y = tf.tile(tf.range(shape[0], dtype=tf.int32)[:, tf.newaxis], [1, shape[1]])
-    x = tf.tile(tf.range(shape[1], dtype=tf.int32)[tf.newaxis, :], [shape[0], 1])
-    return tf.concat([x[:, :, tf.newaxis], y[:, :, tf.newaxis]], axis=-1)
 
 
 def yolo_bbox(arr, shape):

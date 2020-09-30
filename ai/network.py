@@ -3,7 +3,7 @@ from functools import wraps
 import tensorflow as tf
 from tensorflow.keras import models, layers, regularizers
 
-from utils import compose, index_model_layers
+from utils.ai import compose, index_model_layers
 
 
 @wraps(layers.Conv2D)
