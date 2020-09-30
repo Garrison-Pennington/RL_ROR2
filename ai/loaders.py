@@ -277,10 +277,11 @@ class YoloFrames(Sequence):
 
     def __init__(self, out_grids, num_boxes, batch_size):
         self.dataset = TaggedFrames()
-        self.cell_shape = (5 + len(self.dataset.class_labels)) * num_boxes
-        self.out_grids = [np.zeros((*shp, self.cell_shape)) for shp in out_grids]
-        self.num_boxes = num_boxes
+        self.anchors = get_anchors(self.dataset, num_boxes*len(out_grids))
+        self.dataset = zip(*self.dataset)
+        self.scales = out_grids
         self.batch_size = batch_size
+        self.labels = np.vstack([bbox_to_yolo(label, self.anchors[:3], out_grids[-1], (720, 1280)) for label in self.dataset[1]])
 
     def __len__(self):
         return math.ceil(len(self.dataset) / self.batch_size)
@@ -288,34 +289,75 @@ class YoloFrames(Sequence):
     def __getitem__(self, idx):
         data, labels = list(zip(*[self.dataset[i] for i in range(idx * self.batch_size, (idx + 1) * self.batch_size)]))
         image_height, image_width, _ = data[0].shape
-        labels = list(labels)
-        for i in range(len(labels)):
-            l = labels[i]
-            label = []
-            for tmp in self.out_grids:
-                visited = defaultdict(list)
-                arr = tmp.copy()
-                y_cells, x_cells, _ = arr.shape
-                cell_height, cell_width = image_height/y_cells, image_width/x_cells
-                for obj in range(len(l)):
-                    (x, y, w, h) = l[obj, :4]
-                    (_, cx), (_, cy) = math.modf(x / cell_width), math.modf(y / cell_height)
-                    visited[int(cy), int(cx)].append(l[obj])
-                for k in visited:
-                    tmp = join_boxes(*visited[k], cell_shape=(cell_height, cell_width), image_shape=(image_height, image_width))
-                    arr[k] = np.concatenate([tmp for _ in range(self.num_boxes)])
-                label.append(arr.reshape((1, *arr.shape)))
-            labels[i] = label
+        for grid in self.scales:
+            scale_labels = grid.copy()[:len(labels)]
         data = np.array(data).reshape((self.batch_size, image_height, image_width, 3))
         labels = list(zip(*labels))
         return data, labels
 
-    # def __iter__(self):
-    #     return self
-    #
-    # def __next__(self):
-    #     if self.i == len(self):
-    #         raise StopIteration
-    #     item = self[self.i]
-    #     self.i += 1
-    #     return item
+
+def bbox_to_yolo(y, anchors, out_hw, img_shape):
+    # TODO: Add batch dimension
+    """
+
+    :param y: N x (5 + num_classes)
+    :param anchors: num_boxes x 2
+    :param out_hw: (int, int) H x W elements of returned array
+    :param img_shape: (int, int) H x W of source image
+    :return: H x W x (num_boxes * (5 + num_classes))
+    """
+    num_boxes = len(anchors)
+    out_params = y.shape[-1] * num_boxes
+    im_h, im_w = img_shape
+    grid = np.zeros((*out_hw, num_boxes, y.shape[-1]), dtype=np.float32)
+    ch, cw = im_h / out_hw[0], im_w / out_hw[1]
+    y[:, :4] /= [cw, ch, im_w, im_h]
+    boxes = match_to_anchors(y[:, :4], anchors)
+    xy, cr = np.modf(y[:, :2])
+    y[:, :2] = logit(xy)
+    y[:, 2:4] /= anchors[boxes]
+    y[:, 2:4] = np.log(y[:, 2:4])
+    c, r = cr[:, 0], cr[:, 1]
+    grid[r, c, boxes] = y
+    return grid.reshape((1, *out_hw, out_params))
+
+
+def match_to_anchors(xywh, anchors):
+    """
+
+    :param xywh: N x 4
+    :param anchors: num_boxes x 2
+    :return: N indexes in range [0, len(anchors))
+    """
+    num_boxes = len(anchors)
+    xy, wh = xywh[:, :2], xywh[:, 2:4]  # N x 2, N x 2
+    xy = np.tile(xy - wh/2, (num_boxes, 1, 1))  # num_boxes x N x 2
+    wh = np.tile(wh, (num_boxes, 1, 1))  # num_boxes x N x 2
+    axy = np.add(np.full((num_boxes, *xy.shape), .5, dtype=np.float32) - anchors/2, np.modf(xy)[1])  # num_boxes x N x 2
+    rb, arb = xy + wh, axy + anchors  # num_boxes x N x 2, num_boxes x N x 2
+    intersection = np.product(np.fmin(rb, arb) - np.fmax(xy, axy), axis=-1)  # num_boxes x N
+    anchor_area = np.product(anchors, axis=-1)  # num_boxes
+    label_area = np.product(wh, axis=-1)  # num_boxes x N
+    union = np.subtract(np.add(anchor_area, label_area), intersection)  # num_boxes x N
+    iou = intersection / union  # num_boxes x N
+    return np.argmax(iou, axis=0)
+
+
+def get_anchors(frames, num_clusters):
+
+    imgs, labels = zip(*frames)
+    im_height, im_width, *_ = imgs[0].shape
+    wh_data = np.concatenate(labels, axis=0)[:, 2:4] / [im_width, im_height]
+
+    def input_fn():
+        return tf.compat.v1.train.limit_epochs(
+            tf.convert_to_tensor(wh_data, dtype=tf.float32), num_epochs=1)
+
+    kmeans = tf.compat.v1.estimator.experimental.KMeans(num_clusters, use_mini_batch=False)
+
+    iters = 10
+    for _ in range(iters):
+        kmeans.train(input_fn)
+        centers = kmeans.cluster_centers()
+
+    return centers[np.argsort(centers[:, 0] * centers[:, 1])]
