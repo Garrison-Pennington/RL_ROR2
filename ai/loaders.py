@@ -213,13 +213,14 @@ class TaggedFrames(Sequence):
     """
     Dataset of images with localized object classifications
 
-    Data: H x W x 3 numpy array of a jpg image (float32)
-    Label: Object x (x, y, w, h, o, c0-cN) numpy array (float32)
+    Data: batch(1) x H x W x 3 numpy array of a jpg image (float32)
+    Label: batch(1) x Object x (x, y, w, h, o, c0-cN) numpy array (float32)
     """
 
     def json_to_sample(self, sample):
         asset = sample["asset"]
         data = np.asarray(*imageio.read(DETECT_DIR.joinpath(asset["name"]))).astype(np.float32) / 255
+        data = data.reshape((1, *data.shape))
         labels = sample["regions"]
         bboxes, tags = zip(*[(b["boundingBox"], b["tags"]) for b in labels])
         bboxes = np.array([np.array([
@@ -235,7 +236,7 @@ class TaggedFrames(Sequence):
             for t in tags[obj]:
                 tag_arr[obj][t] = 1
         label = np.concatenate((bboxes, tag_arr), axis=1)
-        return data, label
+        return data, label.reshape((1, *label.shape))
 
     def __init__(self):
         with open(DETECT_DIR.joinpath("ROR2-Annotations-export.json")) as f:
@@ -281,7 +282,7 @@ class YoloFrames(Sequence):
         self.dataset = zip(*self.dataset)
         self.scales = out_grids
         self.batch_size = batch_size
-        self.labels = np.vstack([bbox_to_yolo(label, self.anchors[:3], out_grids[-1], (720, 1280)) for label in self.dataset[1]])
+        self.labels = [np.vstack(self.dataset[1][i*batch_size:(i+1)*batch_size]) for i in range(len(self))]
 
     def __len__(self):
         return math.ceil(len(self.dataset) / self.batch_size)
@@ -297,50 +298,78 @@ class YoloFrames(Sequence):
 
 
 def bbox_to_yolo(y, anchors, out_hw, img_shape):
-    # TODO: Add batch dimension
     """
 
-    :param y: N x (5 + num_classes)
+    :param y: batch x N x (5 + num_classes)
     :param anchors: num_boxes x 2
     :param out_hw: (int, int) H x W elements of returned array
     :param img_shape: (int, int) H x W of source image
-    :return: H x W x (num_boxes * (5 + num_classes))
+    :return: batch x H x W x (num_boxes * (5 + num_classes))
     """
     num_boxes = len(anchors)
+    batch_size = len(y)
     out_params = y.shape[-1] * num_boxes
     im_h, im_w = img_shape
     grid = np.zeros((*out_hw, num_boxes, y.shape[-1]), dtype=np.float32)
     ch, cw = im_h / out_hw[0], im_w / out_hw[1]
-    y[:, :4] /= [cw, ch, im_w, im_h]
-    boxes = match_to_anchors(y[:, :4], anchors)
-    xy, cr = np.modf(y[:, :2])
-    y[:, :2] = logit(xy)
-    y[:, 2:4] /= anchors[boxes]
-    y[:, 2:4] = np.log(y[:, 2:4])
-    c, r = cr[:, 0], cr[:, 1]
-    grid[r, c, boxes] = y
-    return grid.reshape((1, *out_hw, out_params))
+    y[..., :4] /= [cw, ch, im_w, im_h]
+    xy, cr = np.modf(y[..., :2])
+    # when 2+ objects in the same cell match the same prior, assign the larger object and shift the other
+    crb = np.concatenate((cr, match_to_anchors(y[..., :4], anchors)), axis=-1)  # batch x N x 3
+    _, dup_idx = np.unique(crb, axis=-1, return_inverse=True)  # (batch_idx, n_idx)
+    if dup_idx:
+        print("2 objects matched the same cell prior")
+        crb = shift_duplicates(crb, dup_idx, num_boxes, y)
+    c, r, b = crb[..., 0], crb[..., 1], crb[..., 2]
+
+    y[..., :2] = logit(xy)
+    y[..., 2:4] /= anchors[b]
+    y[..., 2:4] = np.log(y[..., 2:4])
+    grid[..., r, c, b] = y
+    return grid.reshape((batch_size, *out_hw, out_params))
+
+
+def shift_duplicates(crb, dup_idx, num_boxes, y):
+    dup_crb = crb[dup_idx]
+    dbi, dni = dup_idx
+    areas = np.product(y[..., 2:4], axis=-1)[dup_idx]  # num_dupes
+    l_idx = np.argsort(areas)
+    dup_crb, dbi, dni = dup_crb[l_idx], dbi[l_idx], dni[l_idx]
+    seen = defaultdict(list)
+    for i, (c, r, b) in enumerate(dup_crb):
+        k = f"{c}{r}{b}"
+        if b in seen[k]:
+            choices = [i for i in range(num_boxes)]
+            choices.remove(b)
+            while b in seen[k]:
+                b = choices.pop()
+            seen[k].append(b)
+            crb[dbi[i], dni[i], 2] = b
+        else:
+            seen[k].append(b)
+    return crb
 
 
 def match_to_anchors(xywh, anchors):
     """
 
-    :param xywh: N x 4
+    :param xywh: batch x N x 4
     :param anchors: num_boxes x 2
     :return: N indexes in range [0, len(anchors))
     """
     num_boxes = len(anchors)
-    xy, wh = xywh[:, :2], xywh[:, 2:4]  # N x 2, N x 2
-    xy = np.tile(xy - wh/2, (num_boxes, 1, 1))  # num_boxes x N x 2
-    wh = np.tile(wh, (num_boxes, 1, 1))  # num_boxes x N x 2
-    axy = np.add(np.full((num_boxes, *xy.shape), .5, dtype=np.float32) - anchors/2, np.modf(xy)[1])  # num_boxes x N x 2
-    rb, arb = xy + wh, axy + anchors  # num_boxes x N x 2, num_boxes x N x 2
-    intersection = np.product(np.fmin(rb, arb) - np.fmax(xy, axy), axis=-1)  # num_boxes x N
+    batch_size = len(xywh)
+    xy, wh = xywh[..., :2], xywh[..., 2:4]  # batch x N x 2, batch x N x 2
+    xy = np.tile(xy - wh/2, (1, num_boxes, 1, 1))  # batch x num_boxes x N x 2
+    wh = np.tile(wh, (1, num_boxes, 1, 1))  # batch x num_boxes x N x 2
+    axy = np.add(np.full((batch_size, num_boxes, *xy.shape), .5, dtype=np.float32) - anchors/2, np.modf(xy)[1])  # batch x num_boxes x N x 2
+    rb, arb = xy + wh, axy + anchors  # batch x num_boxes x N x 2, batch x num_boxes x N x 2
+    intersection = np.product(np.fmin(rb, arb) - np.fmax(xy, axy), axis=-1)  # batch x num_boxes x N
     anchor_area = np.product(anchors, axis=-1)  # num_boxes
-    label_area = np.product(wh, axis=-1)  # num_boxes x N
-    union = np.subtract(np.add(anchor_area, label_area), intersection)  # num_boxes x N
-    iou = intersection / union  # num_boxes x N
-    return np.argmax(iou, axis=0)
+    label_area = np.product(wh, axis=-1)  # batch x num_boxes x N
+    union = np.subtract(np.add(anchor_area, label_area), intersection)  # batch x num_boxes x N
+    iou = intersection / union  # batch x num_boxes x N
+    return np.argmax(iou, axis=1)  # batch x N
 
 
 def get_anchors(frames, num_clusters):
