@@ -21,7 +21,7 @@ def download(cloud_filename, local_filename=None):
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     local_filename = Path.expanduser(Path(f"~/{bucket_name}/{blob_name}")) if local_filename is None else local_filename
-    blob.download_to_file_name(local_filename)
+    blob.download_to_filename(local_filename)
     return local_filename
 
 
