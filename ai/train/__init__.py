@@ -11,17 +11,18 @@ def bce():
     return tf.keras.losses.BinaryCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
 
 
-def yolo_loss(num_boxes=2, ignore_threshold=.5, localization_weight=5, no_obj_weight=0.5):
+def yolo_loss(anchors, out_grids, num_boxes=3, ignore_threshold=.5, localization_weight=5, no_obj_weight=0.5):
     """
     Yolo Loss function constructor
 
+    :param anchors:
+    :param out_grids:
     :param num_boxes:
     :param ignore_threshold:
     :param localization_weight:
     :param no_obj_weight:
     :return:
     """
-
     def inner(y_actual, y_pred):
         """
         YoloV3 Loss function
@@ -32,85 +33,73 @@ def yolo_loss(num_boxes=2, ignore_threshold=.5, localization_weight=5, no_obj_we
         :type y_pred: tf.Tensor
         :return: scalar value
         """
-        y_actual = tf.concat(tf.split(y_actual, num_boxes, axis=3), axis=0)  # 2 * batch x H x W x 5 + num_classes
-        y_pred = tf.concat(tf.split(y_pred, num_boxes, axis=3), axis=0)  # 2 * batch x H x W x 5 + num_classes
-        true_boxes, true_obj, true_classes = y_actual[..., :4], y_actual[..., 4:5], y_actual[..., 5:]
-        pred_boxes, pred_obj, pred_classes = y_pred[..., :4], y_pred[..., 4:5], y_pred[..., 5:]
-        true_anchors, true_sizes = true_boxes[..., :2], true_boxes[..., 2:]
-        pred_anchors, pred_sizes = pred_boxes[..., :2], pred_boxes[..., 2:]
-        obj_mask = true_obj[..., 0]
+        batch_size, grid_h, grid_w, params = y_pred.shape
+        for i, (h, w) in enumerate(out_grids):
+            if grid_h == h and grid_w == w:
+                scale_anchors = tf.constant(anchors[-i - 1])
+        y_actual = tf.reshape(y_actual, (-1, grid_h, grid_w, num_boxes, params//num_boxes))  # B, H, W, A, 5 + num_classes
+        y_pred = tf.reshape(y_pred, (-1, grid_h, grid_w, num_boxes, params//num_boxes))  # B, H, W, A, 5 + num_classes
+        true_boxes, true_obj, true_classes = y_actual[..., :4], y_actual[..., 4:5], y_actual[..., 5:]  # (B, H, W, A, _): xywh, o, c
+        pred_boxes, pred_obj, pred_classes = y_pred[..., :4], y_pred[..., 4:5], y_pred[..., 5:]  # (B, H, W, A, _): xywh, o, c
+        true_anchors, true_sizes = true_boxes[..., :2], true_boxes[..., 2:]  # (B, H, W, A, _): xy, wh
+        pred_anchors, pred_sizes = pred_boxes[..., :2], pred_boxes[..., 2:]  # (B, H, W, A, _): xy, wh
+        obj_mask = true_obj[..., 0]  # B, H, W, A
+        iou = bbox_iou(t_to_b(true_boxes, scale_anchors), t_to_b(pred_boxes, scale_anchors))  # B, H, W, A
+        ignore_mask = tf.where(iou < ignore_threshold, tf.ones(tf.shape(iou)), tf.zeros(tf.shape(iou)))  # B, H, W, A
         _, h, w, *_ = pred_boxes.shape
-        true_boxes = yolo_bbox(true_boxes, (h, w))
-        pred_boxes = yolo_bbox(pred_boxes, (h, w))
-        iou = bbox_iou(true_boxes, pred_boxes)
-        ignore_mask = tf.subtract(tf.constant(1, shape=(h, w), dtype=tf.float32),
-                                  tf.floor(tf.math.divide_no_nan(iou, tf.constant(ignore_threshold, shape=(h, w),
-                                                                                  dtype=tf.float32))))
-        anchor_loss = localization_weight * mse(true_anchors, pred_anchors)
-        # TODO: Compute true anchor pos with respect to prior box  -->  ln(true_pos / prior_pos) = ground_truth
+        xy_loss = localization_weight * mse(true_anchors, pred_anchors)
         shape_loss = localization_weight * mse(true_sizes, pred_sizes)
-        object_loss = tf.reduce_sum(tf.multiply(bce()(true_obj, pred_obj), obj_mask))
-        no_object_loss = no_obj_weight * tf.reduce_sum(
-            tf.multiply(
-                tf.multiply(
-                    bce()(true_obj, pred_obj),
-                    tf.subtract(tf.constant(1, shape=(h, w), dtype=tf.float32), obj_mask)),
-                ignore_mask
-            )
+        obj_loss = tf.reduce_sum(tf.reduce_mean(bce()(true_obj, tf.sigmoid(pred_obj)) * obj_mask, axis=0))
+        noobj_loss = no_obj_weight * tf.reduce_sum(
+            tf.reduce_mean(bce()(true_obj, tf.sigmoid(pred_obj)) * (1 - obj_mask) * ignore_mask, axis=0)
         )
-        class_loss = tf.reduce_sum(tf.multiply(bce()(true_classes, pred_classes), obj_mask))
-        # tf.print(anchor_loss, shape_loss, object_loss, no_object_loss, class_loss, output_stream=sys.stdout)
-        return tf.reduce_sum([anchor_loss, shape_loss, object_loss, no_object_loss, class_loss])
+        class_loss = tf.reduce_sum(tf.reduce_mean(bce()(true_classes, tf.sigmoid(pred_classes)) * obj_mask, axis=0))
+        return tf.reduce_sum([xy_loss, shape_loss, obj_loss, noobj_loss, class_loss])
 
     return inner
 
 
-def features_to_bboxes(y, anchors, num_classes):
+def t_to_b(y, anchors):
     """
 
-    :param y: batch x H x W x (5 + num_classes) * num_boxes
-    :param anchors: num_boxes x (w, h)
-    :param num_classes:
-    :return:
+    :param y: batch, H, W, A, 4
+    :param anchors: A, (w, h)
+    :return: B, H, W, A, 4
     """
 
     num_boxes = len(anchors)
     conv_shape = tf.shape(y)
     batch_size = conv_shape[0]
-    out_h, out_w = conv_shape[1:3]
+    out_h, out_w = conv_shape[1], conv_shape[2]
 
-    y = tf.reshape(y, (batch_size, out_h, out_w, num_boxes, 5 + num_classes))
-
-    xy, wh, o, c = tf.split(y, [2, 2, 1, num_classes], axis=-1)  # batch x H x W x box x (2, 2, 1, num_classes)
+    xy, wh = y[..., :2], y[..., 2:4]  # (B, H, W, A, _): xy, wh
 
     grid = tf.tile(idx_tensor((out_h, out_w))[tf.newaxis, :, :, tf.newaxis, :], [batch_size, 1, 1, num_boxes, 1])
 
-    xy = tf.sigmoid(xy) + grid
-    wh = tf.exp(wh) * anchors
+    xy = tf.sigmoid(xy) + grid  # B, H, W, A, xy
+    wh = tf.exp(wh) * anchors  # B, H, W, A, wh
 
-    o = tf.sigmoid(o)
-    c = tf.sigmoid(c)
-
-    return tf.concat([xy, wh, o, c], axis=-1)  # batch x H x W x box x (5 + num_classes)
+    return tf.concat([xy, wh], axis=-1)  # B, H, W, A, 4
 
 
-def yolo_bbox(arr, shape):
+def yolo_bbox(arr, shape, anchors):
     """
     Convert YoloV3 predictions to bounding boxes
 
-    :param arr: N x H x W x 4 (x, y, w, h)
+    :param arr: N x H x W x num_boxes x 4 (x, y, w, h)
     :type arr: tf.Tensor
     :param shape: tuple (H, w)
+    :param anchors: num_boxes x 2
     :return: N x H x W x 4 (minx, miny, maxx, maxy in range [0, 1))
     """
     im_height, im_width = shape
     x, y, w, h = arr[..., 0], arr[..., 1], arr[..., 2], arr[..., 3]
     w *= im_width
     h *= im_height
-    c_idx = tf.repeat(tf.expand_dims(tf.range(im_width, dtype=tf.float32), axis=0), [im_height], axis=0)
-    r_idx = tf.transpose(
+    c_idx = tf.expand_dims(tf.repeat(tf.expand_dims(tf.range(im_width, dtype=tf.float32), axis=0), [im_height], axis=0), axis=-1)
+    r_idx = tf.expand_dims(tf.transpose(
         tf.repeat(tf.expand_dims(tf.range(im_height, dtype=tf.float32), axis=0), [im_width], axis=0),
-        perm=[1, 0])
+        perm=[1, 0]), axis=-1)
     minx = tf.subtract(tf.add(c_idx, x), w / 2)
     miny = tf.subtract(tf.add(r_idx, y), h / 2)
     maxx, maxy = tf.add(minx, w), tf.add(miny, h)
@@ -119,14 +108,24 @@ def yolo_bbox(arr, shape):
 
 
 def bbox_iou(b1, b2):
-    # N x ___
-    b_bound = tf.stack([b1, b2], axis=1)  # 2 x h x w x 4
-    in_mins = tf.reduce_max(b_bound[..., :2], axis=1)  # h x w x 2
-    in_maxs = tf.reduce_min(b_bound[..., 2:4], axis=1)  # h x w x 2
-    in_dims = tf.clip_by_value(tf.subtract(in_maxs, in_mins), 0, 1)  # h x w x 2
-    in_area = tf.multiply(in_dims[..., 0], in_dims[..., 1])  # h x w
-    un_dims = tf.clip_by_value(tf.subtract(b_bound[..., 2:], b_bound[..., :2]), 0, 1)  # 2 x h x w x 2
-    un_area = tf.reduce_sum(tf.multiply(un_dims[..., 0], un_dims[..., 1]), axis=1)  # h x w
-    # un_area = (XOR area + 2 * AND area), OR area = un_area - AND area
-    un_area = tf.subtract(un_area, in_area)  # h x w
-    return tf.math.divide_no_nan(in_area, un_area)  # h x w
+    """
+
+    :param b1: B, H, W, A, xywh
+    :param b2: B, H, W, A, xywh
+    :return: B, H, W, A
+    """
+    xy1, wh1 = b1[..., :2], b1[..., 2:4]
+    xy2, wh2 = b2[..., :2], b2[..., 2:4]
+    xy1 -= wh1/2
+    xy2 -= wh2/2
+    mins = tf.stack((xy1, xy2), axis=0)  # 2, B, H, W, A, 2
+    maxs = tf.stack((xy1 + wh1, xy2 + wh2), axis=0)  # 2, B, H, W, A, 2
+    in_mins = tf.reduce_max(mins, axis=0)  # B, H, W, A, 2
+    in_maxs = tf.reduce_min(maxs, axis=0)  # B, H, W, A, 2
+    in_dims = in_maxs - in_mins  # B, H, W, A, 2
+    in_area = tf.reduce_prod(in_dims, axis=-1)  # B, H, W, A
+    un_dims = tf.stack((wh1, wh2), axis=0)  # 2, B, H, W, A, 2
+    un_area = tf.reduce_prod(un_dims, axis=-1)  # 2, B, H, W, A
+    un_area = tf.reduce_sum(un_area, axis=0)  # B, H, W, A
+    un_area = un_area - in_area  # B, H, W, A
+    return tf.math.divide_no_nan(in_area, un_area)  # B, H, W, A
