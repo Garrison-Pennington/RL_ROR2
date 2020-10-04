@@ -13,20 +13,7 @@ import numpy as np
 from tensorflow.keras.utils import Sequence
 import tensorflow as tf
 
-from loggers import (
-    KEY_DIR,
-    MOUSE_DIR,
-    SESSION_DIR,
-    KEY_PRESS,
-    KEY_RELEASE,
-    MOUSE_WHEEL_CODE,
-    MOUSE_PRESS_CODES,
-    MOUSE_MOVEMENT_CODE,
-    MOUSE_RELEASE_CODES,
-    MOUSE_BUTTON_MAP,
-)
 from utils import time_list
-from utils.ai import logit, idx_tensor
 
 VID_DIR = Path("C:/Users/garri/IdeaProjects/ILDataCollector/data/video/")
 DETECT_DIR = Path("C:/Users/garri/data/ROR2/vott-json-export/")
@@ -73,6 +60,11 @@ class Frames:
 class Actions:
 
     def __init__(self, session_stamp):
+        from loggers import (
+            KEY_DIR,
+            MOUSE_DIR,
+            SESSION_DIR,
+        )
         with open(Path(KEY_DIR + session_stamp + ".log"), "r") as f:
             self.keys = f.readlines()
         with open(Path(MOUSE_DIR + session_stamp + ".log"), "r") as f:
@@ -115,6 +107,10 @@ class Actions:
         return best
 
     def key_log_to_frame_states(self, log):
+        from loggers import (
+            KEY_PRESS,
+            KEY_RELEASE,
+        )
         # Divide action states into frames
         offset = self.session["recording start"] - self.session["input start"]  # Delay (sec) between beginning of input log and beginning of video
         step = 1 / self.fps # time in seconds one frame fills
@@ -165,6 +161,13 @@ class Actions:
         :param log:  List of lines of mouse input log
         :return:
         """
+        from loggers import (
+            MOUSE_WHEEL_CODE,
+            MOUSE_PRESS_CODES,
+            MOUSE_MOVEMENT_CODE,
+            MOUSE_RELEASE_CODES,
+            MOUSE_BUTTON_MAP,
+        )
         tier_map = [*MOUSE_PRESS_CODES, *MOUSE_RELEASE_CODES, MOUSE_WHEEL_CODE, MOUSE_MOVEMENT_CODE]
         # Divide action states into frames
         offset = self.session["recording start"] - self.session["input start"]  # Delay (sec) between beginning of input log and beginning of video
