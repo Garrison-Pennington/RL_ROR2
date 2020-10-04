@@ -6,10 +6,10 @@ from ai.loaders import YoloFrames
 from ai.network import YOLOv3
 from ai.train import yolo_loss
 
-out_grids = ((22, 40), (45, 80), (90, 160))
+out_grids = ((11, 20), (22, 40), (45, 80))
 training_data = YoloFrames(out_grids, 3, 1)
 # t = training_data[0][1][0]
-net = YOLOv3((720, 1280, 3), 17, 3, num_scales=3)
+net = YOLOv3((720, 1280, 3), 17, 3, num_scales=4, extra_ds=1)
 model = net.compile_model(
     loss=yolo_loss(training_data.anchors, out_grids),
     optimizer='adam'
