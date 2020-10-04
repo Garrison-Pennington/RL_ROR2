@@ -3,8 +3,10 @@ import time
 from datetime import date
 import atexit
 import json
+import platform
 
-from winput import hook_mouse, hook_keyboard, wait_messages, stop, unhook_mouse, unhook_keyboard, winput
+if platform.system() == "Windows":
+    from winput import hook_mouse, hook_keyboard, wait_messages, stop, unhook_mouse, unhook_keyboard, winput
 
 from utils import update_json, time_list
 from control import stop_recording
