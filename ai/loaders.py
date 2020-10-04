@@ -1,5 +1,4 @@
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # or any {'0', '1', '2'}
 import math
 import itertools
 import json
@@ -7,16 +6,27 @@ from io import BytesIO
 from pathlib import Path
 from collections import defaultdict
 from functools import reduce
+from platform import system
 
 import imageio
 import numpy as np
-from tensorflow.keras.utils import Sequence
-import tensorflow as tf
 
 from utils import time_list
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # or any {'0', '1', '2'}
+from tensorflow.keras.utils import Sequence
+import tensorflow as tf
+
 VID_DIR = Path("C:/Users/garri/IdeaProjects/ILDataCollector/data/video/")
-DETECT_DIR = Path("C:/Users/garri/data/ROR2/vott-json-export/")
+WINDOWS_DETECT_DIR = Path("C:/Users/garri/data/ROR2/vott-json-export/")
+LINUX_DETECT_DIR = Path.expanduser(Path("~/tmp/tagged_frames/"))
+
+
+def get_vott_annotations():
+    data_dir = WINDOWS_DETECT_DIR if system() == "Windows" else LINUX_DETECT_DIR
+    with open(data_dir.joinpath("annotations.json")) as f:
+        annotations = json.load(f)
+    return annotations
 
 
 class RawVideo:
@@ -234,7 +244,7 @@ class TaggedFrames(Sequence):
 
     def json_to_sample(self, sample):
         asset = sample["asset"]
-        data = np.asarray(*imageio.read(DETECT_DIR.joinpath(asset["name"]))).astype(np.float32) / 255
+        data = np.asarray(*imageio.read(self.dir.joinpath(asset["name"]))).astype(np.float32) / 255
         data = data.reshape((1, *data.shape))
         labels = sample["regions"]
         bboxes, tags = zip(*[(b["boundingBox"], b["tags"]) for b in labels])
@@ -254,8 +264,8 @@ class TaggedFrames(Sequence):
         return data, label.reshape((1, *label.shape))
 
     def __init__(self):
-        with open(DETECT_DIR.joinpath("ROR2-Annotations-export.json")) as f:
-            annotations = json.load(f)
+        annotations = get_vott_annotations()
+        self.dir = WINDOWS_DETECT_DIR if system() == "Windows" else LINUX_DETECT_DIR
         self.class_labels = [a["name"] for a in annotations["tags"]]
         self.samples = list(map(lambda k: self.json_to_sample(annotations["assets"][k]), annotations["assets"]))
 
