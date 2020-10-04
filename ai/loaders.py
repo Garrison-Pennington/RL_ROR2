@@ -2,6 +2,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # or any {'0', '1', '2'}
 import math
 import itertools
+import json
 from io import BytesIO
 from pathlib import Path
 from collections import defaultdict
@@ -12,7 +13,18 @@ import numpy as np
 from tensorflow.keras.utils import Sequence
 import tensorflow as tf
 
-from loggers import *
+from loggers import (
+    KEY_DIR,
+    MOUSE_DIR,
+    SESSION_DIR,
+    KEY_PRESS,
+    KEY_RELEASE,
+    MOUSE_WHEEL_CODE,
+    MOUSE_PRESS_CODES,
+    MOUSE_MOVEMENT_CODE,
+    MOUSE_RELEASE_CODES,
+    MOUSE_BUTTON_MAP,
+)
 from utils import time_list
 from utils.ai import logit, idx_tensor
 
