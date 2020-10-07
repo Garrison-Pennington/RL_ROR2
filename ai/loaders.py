@@ -304,22 +304,19 @@ class YoloFrames(Sequence):
                 [xywho + classes]
     """
 
-    def __init__(self, out_grids, num_boxes, batch_size):
-        self.dataset = TaggedFrames()
+    def __init__(self, frames, out_grids, num_boxes, batch_size):
+        self.frames = frames
         self.batch_size = batch_size
-        self.data, labels = list(zip(*self.dataset))
-        self.anchors = np.split(get_anchors(labels, num_boxes*len(out_grids)), len(out_grids), axis=0)
-        _, *image_shape = self.data[0].shape
-        self.data = [np.vstack(self.data[i*batch_size:(i+1)*batch_size]) for i in range(len(self))]
+        self.data = [np.stack([f.image for f in frames[i*batch_size:(i+1)*batch_size]]) for i in range(len(self))]
+        self.anchors = np.split(get_anchors([f.objects for f in self.frames], num_boxes*len(out_grids)), len(out_grids), axis=0)
         labels = [[bbox_to_yolo(l.copy(), self.anchors[i], out_grids[-i])
-                        for i in range(len(out_grids))] for l in labels]
-        self.labels = [labels[i*batch_size:(i+1)*batch_size] for i in range(len(self))]
-        self.labels = [[np.vstack(l) for l in list(zip(*batch))] for batch in self.labels]
+                        for i in range(len(out_grids))] for l in [f.objects for f in self.frames]]
+        self.labels = [[np.stack(l) for l in list(zip(*batch))] for batch in [labels[i*batch_size:(i+1)*batch_size] for i in range(len(self))]]
         for batch in self.labels:
             batch.sort(key=lambda arr: arr.shape[1])
 
     def __len__(self):
-        return math.ceil(len(self.dataset) / self.batch_size)
+        return math.ceil(len(self.frames) / self.batch_size)
 
     def __getitem__(self, idx):
         return self.data[idx], self.labels[idx]
@@ -328,7 +325,7 @@ class YoloFrames(Sequence):
 def bbox_to_yolo(y, anchors, out_hw):
     """
 
-    :param y: batch x N x (5 + num_classes)
+    :param y: N x (5 + num_classes)
     :param anchors: num_boxes x 2
     :param out_hw: (int, int) H x W elements of returned array
     :return: batch x H x W x (num_boxes * (5 + num_classes))
@@ -337,9 +334,12 @@ def bbox_to_yolo(y, anchors, out_hw):
     out_params = y.shape[-1] * num_boxes
     grid = np.zeros((*out_hw, num_boxes, y.shape[-1]), dtype=np.float32)
     y[..., :2] *= [out_hw[1], out_hw[0]]
-    xy, cr = np.modf(y[..., :2])
+    xy, cr = np.modf(y[..., :2])  # B, N, 2
     # when 2+ objects in the same cell match the same prior, assign the larger object and shift the other
-    crb = np.concatenate((cr, match_to_anchors(y[..., :4].copy(), anchors).reshape((1, -1, 1))), axis=-1).astype(np.uint8)  # batch x N x 3
+    crb = np.concatenate((
+        cr,
+        match_to_anchors(y[..., :4].copy(), anchors).reshape((-1, 1))),
+        axis=-1).astype(np.uint8)  # N x 3
     _, dup_idx = np.unique(crb, axis=-1, return_inverse=True)  # (batch_idx, n_idx)
     if np.ndarray(dup_idx).any():
         print("2 objects matched the same cell prior")
@@ -347,10 +347,10 @@ def bbox_to_yolo(y, anchors, out_hw):
     c, r, b = crb[..., 0], crb[..., 1], crb[..., 2]
     xy[xy == 0] = 1 / 7680  # ln(0) is undefined and will introduce NANs, setting this to a very low value is effectively ln(0) but is defined
     y[..., :2] = np.log(xy/(1-xy))
-    y[..., 2:4] /= anchors[b]
+    y[..., 2:4] /= np.maximum(anchors[b], .001)
     y[..., 2:4] = np.log(y[..., 2:4])
     grid[r, c, b] = y
-    return grid.reshape((1, *out_hw, out_params))
+    return grid.reshape(*out_hw, out_params)
 
 
 def shift_duplicates(crb, dup_idx, num_boxes, y):
@@ -396,8 +396,8 @@ def match_to_anchors(xywh, anchors):
 
 
 def get_anchors(labels, num_clusters):
-    labels = np.concatenate(labels, axis=1)
-    wh_data = labels.reshape((labels.shape[1], labels.shape[2]))[..., 2:4]
+
+    wh_data = np.vstack(labels)[..., 2:4]
 
     def input_fn():
         return tf.compat.v1.train.limit_epochs(
