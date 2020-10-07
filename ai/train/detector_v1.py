@@ -1,4 +1,4 @@
-from os import path
+from pathlib import Path
 
 import tensorflow as tf
 
@@ -16,7 +16,7 @@ model = net.compile_model(
     optimizer='adam'
 )
 
-cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=path.expanduser("~/models/ror2_yolov3_v1"),
+cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=Path.expanduser(Path("~/models/ror2_yolov3_v1")),
                                                  save_weights_only=True,
                                                  verbose=1)
 
@@ -28,6 +28,6 @@ try:
         callbacks=[cp_callback]
     )
 except KeyboardInterrupt:
-    model.save(path.expanduser("~/models/ror2_yolov3_v1"))
+    model.save(Path.expanduser(Path("~/models/ror2_yolov3_v1")))
 else:
-    model.save(path.expanduser("~/models/ror2_yolov3_v1"))
+    model.save(Path.expanduser(Path("~/models/ror2_yolov3_v1")))
