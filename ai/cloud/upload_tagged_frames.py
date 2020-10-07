@@ -30,7 +30,8 @@ annotations = list(
             WINDOWS_DETECT_DIR.joinpath(Path(asset["asset"]["name"]).stem + ".tags"),
             TaggedFrames.regions_to_label(
                 asset["regions"],
-                class_labels
+                class_labels,
+                (int(asset["asset"]["size"]["height"]), int(asset["asset"]["size"]["width"]))
             )
         )
     }, map(lambda k:
