@@ -69,7 +69,7 @@ def t_to_b(y, anchors):
     :return: B, H, W, A, 4
     """
 
-    num_boxes = len(anchors)
+    num_boxes = anchors.shape[0]
     conv_shape = tf.shape(y)
     batch_size = conv_shape[0]
     out_h, out_w = conv_shape[1], conv_shape[2]
