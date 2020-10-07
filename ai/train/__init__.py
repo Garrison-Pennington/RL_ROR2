@@ -3,8 +3,10 @@ import tensorflow as tf
 from utils.ai import idx_tensor
 
 
-def mse(y_true, y_pred):
-    return tf.reduce_sum(tf.reduce_mean(tf.square(tf.subtract(y_true, y_pred)), axis=0))
+def mse(y_true, y_pred, mask=None):
+    result = tf.square(tf.subtract(y_true, y_pred))
+    if mask is not None: result *= tf.tile(mask[..., tf.newaxis], [1, 1, 1, 1, 2])
+    return tf.reduce_sum(tf.reduce_mean(result, axis=0))
 
 
 def bce():
@@ -47,8 +49,8 @@ def yolo_loss(anchors, out_grids, num_boxes=3, ignore_threshold=.5, localization
         iou = bbox_iou(t_to_b(true_boxes, scale_anchors), t_to_b(pred_boxes, scale_anchors))  # B, H, W, A
         ignore_mask = tf.where(iou < ignore_threshold, tf.ones(tf.shape(iou)), tf.zeros(tf.shape(iou)))  # B, H, W, A
         _, h, w, *_ = pred_boxes.shape
-        xy_loss = localization_weight * mse(true_anchors, pred_anchors) * obj_mask
-        shape_loss = localization_weight * mse(true_sizes, pred_sizes) * obj_mask
+        xy_loss = localization_weight * mse(true_anchors, pred_anchors, obj_mask)
+        shape_loss = localization_weight * mse(true_sizes, pred_sizes, obj_mask)
         obj_loss = tf.reduce_sum(tf.reduce_mean(bce()(true_obj, tf.sigmoid(pred_obj)) * obj_mask, axis=0))
         noobj_loss = no_obj_weight * tf.reduce_sum(
             tf.reduce_mean(bce()(true_obj, tf.sigmoid(pred_obj)) * (1 - obj_mask) * ignore_mask, axis=0)
