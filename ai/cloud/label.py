@@ -16,17 +16,21 @@ class TaggedFrame:
 
     @property
     def image(self):
-        fp = local_cloud_file((TAGGED_FRAMES, self.dir.joinpath(self.name)))
+        fp = local_cloud_file((TAGGED_FRAMES, self.name + ".jpg"), self.dir.joinpath(self.name + ".jpg"))
         return np.asarray(*imageio.read(fp)).astype(np.float32) / 255
 
     @property
     def objects(self):
-        fp = local_cloud_file((TAGGED_FRAMES, "annotations.json"), self.dir.joinpath("annotations.json"))
+        npzfile = np.load(local_cloud_file((TAGGED_FRAMES, self.name+".tags.npz"), self.dir.joinpath(self.name + ".tags.npz")))
+        return npzfile["arr_0"]
 
 
 def tagged_frames():
-    return map(lambda s: TaggedFrame(s),
-               filter(lambda s: s != "annotations.json",
-                      get_blob_names(TaggedFrame)
-                      )
-               )
+    blob_names = get_blob_names(TAGGED_FRAMES)
+    return list(
+        map(lambda s: TaggedFrame(Path(s).stem),
+            filter(lambda s: s != "annotations.json" and
+                    not s.endswith(".tags.npz"),
+                    blob_names
+                   )
+            ))
