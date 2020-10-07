@@ -47,8 +47,8 @@ def yolo_loss(anchors, out_grids, num_boxes=3, ignore_threshold=.5, localization
         iou = bbox_iou(t_to_b(true_boxes, scale_anchors), t_to_b(pred_boxes, scale_anchors))  # B, H, W, A
         ignore_mask = tf.where(iou < ignore_threshold, tf.ones(tf.shape(iou)), tf.zeros(tf.shape(iou)))  # B, H, W, A
         _, h, w, *_ = pred_boxes.shape
-        xy_loss = localization_weight * mse(true_anchors, pred_anchors)
-        shape_loss = localization_weight * mse(true_sizes, pred_sizes)
+        xy_loss = localization_weight * mse(true_anchors, pred_anchors) * obj_mask
+        shape_loss = localization_weight * mse(true_sizes, pred_sizes) * obj_mask
         obj_loss = tf.reduce_sum(tf.reduce_mean(bce()(true_obj, tf.sigmoid(pred_obj)) * obj_mask, axis=0))
         noobj_loss = no_obj_weight * tf.reduce_sum(
             tf.reduce_mean(bce()(true_obj, tf.sigmoid(pred_obj)) * (1 - obj_mask) * ignore_mask, axis=0)
