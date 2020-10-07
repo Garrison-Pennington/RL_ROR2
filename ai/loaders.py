@@ -242,25 +242,28 @@ class TaggedFrames(Sequence):
     Label: batch(1) x Object x (x, y, w, h, o, c0-cN) numpy array (float32)
     """
 
-    def json_to_sample(self, sample):
-        asset = sample["asset"]
-        data = np.asarray(*imageio.read(self.dir.joinpath(asset["name"]))).astype(np.float32) / 255
-        data = data.reshape((1, *data.shape))
-        labels = sample["regions"]
-        bboxes, tags = zip(*[(b["boundingBox"], b["tags"]) for b in labels])
+    @classmethod
+    def regions_to_label(cls, regions, classes, image_shape):
+        bboxes, tags = zip(*[(b["boundingBox"], b["tags"]) for b in regions])
         bboxes = np.array([np.array([
-            b["left"]+b["width"]/2,  # x
-            b["top"]+b["height"]/2,  # y
-            b["width"],              # w
-            b["height"],             # h
+            (b["left"] + b["width"] / 2) / image_shape[1],  # x
+            (b["top"] + b["height"] / 2) / image_shape[0],  # y
+            b["width"] / image_shape[1],              # w
+            b["height"] / image_shape[0],             # h
             1                        # o
         ]) for b in bboxes])
-        tags = list(map(lambda lot: [self.class_labels.index(t) for t in lot], tags))
-        tag_arr = np.zeros((len(tags), len(self.class_labels))).astype(np.float32)
+        tags = list(map(lambda lot: [classes.index(t) for t in lot], tags))
+        tag_arr = np.zeros((len(tags), len(classes))).astype(np.float32)
         for obj in range(len(tags)):
             for t in tags[obj]:
                 tag_arr[obj][t] = 1
-        label = np.concatenate((bboxes, tag_arr), axis=1)
+        return np.concatenate((bboxes, tag_arr), axis=1)
+
+    def json_to_sample(self, sample):
+        asset = sample["asset"]
+        data = np.asarray(*imageio.read(self.dir.joinpath(asset["name"]))).astype(np.float32) / 255
+        label = self.regions_to_label(sample["regions"], self.class_labels, data.shape)
+        data = data.reshape((1, *data.shape))
         return data, label.reshape((1, *label.shape))
 
     def __init__(self):
@@ -274,29 +277,6 @@ class TaggedFrames(Sequence):
 
     def __getitem__(self, item):
         return self.samples[item]
-
-
-def join_boxes(*boxes, cell_shape, image_shape):
-    if len(boxes) == 1:
-        (x, y, w, h, _), classes = boxes[0][:5], boxes[0][5:]
-        minx, miny, maxx, maxy = x - w/2, y - h/2, x + w/2, y + h/2
-        classes = np.array(classes)
-    else:
-        xs, ys, ws, hs, o, *classes = tuple(zip(*boxes))
-        bounds = list(zip(*[(
-            xs[i] - ws[i]/2,
-            ys[i] - hs[i]/2,
-            xs[i] + ws[i]/2,
-            ys[i] + hs[i]/2
-        ) for i in range(len(xs))]))
-        (minx, miny), (maxx, maxy) = tuple(map(min, bounds[:2])), tuple((map(max, bounds[2:])))
-        classes = list(zip(*classes))
-        classes = reduce(np.logical_or, classes)
-    (cell_height, cell_width), (image_height, image_width) = cell_shape, image_shape
-    w, h = (maxx - minx)/image_width, (maxy - miny)/image_height
-    (x, _), (y, _) = math.modf(((minx + maxx)/2)/cell_width), \
-                     math.modf(((miny + maxy)/2)/cell_height)
-    return np.array([x, y, w, h, 1, *classes])
 
 
 class YoloFrames(Sequence):
@@ -328,10 +308,10 @@ class YoloFrames(Sequence):
         self.dataset = TaggedFrames()
         self.batch_size = batch_size
         self.data, labels = list(zip(*self.dataset))
-        self.anchors = np.split(get_anchors(self.dataset, num_boxes*len(out_grids)), len(out_grids), axis=0)
+        self.anchors = np.split(get_anchors(labels, num_boxes*len(out_grids)), len(out_grids), axis=0)
         _, *image_shape = self.data[0].shape
         self.data = [np.vstack(self.data[i*batch_size:(i+1)*batch_size]) for i in range(len(self))]
-        labels = [[bbox_to_yolo(l.copy(), self.anchors[i], out_grids[-i], image_shape)
+        labels = [[bbox_to_yolo(l.copy(), self.anchors[i], out_grids[-i])
                         for i in range(len(out_grids))] for l in labels]
         self.labels = [labels[i*batch_size:(i+1)*batch_size] for i in range(len(self))]
         self.labels = [[np.vstack(l) for l in list(zip(*batch))] for batch in self.labels]
@@ -345,30 +325,27 @@ class YoloFrames(Sequence):
         return self.data[idx], self.labels[idx]
 
 
-def bbox_to_yolo(y, anchors, out_hw, img_shape):
+def bbox_to_yolo(y, anchors, out_hw):
     """
 
     :param y: batch x N x (5 + num_classes)
     :param anchors: num_boxes x 2
     :param out_hw: (int, int) H x W elements of returned array
-    :param img_shape: (int, int) H x W of source image
     :return: batch x H x W x (num_boxes * (5 + num_classes))
     """
     num_boxes = len(anchors)
     out_params = y.shape[-1] * num_boxes
-    im_h, im_w, *_ = img_shape
     grid = np.zeros((*out_hw, num_boxes, y.shape[-1]), dtype=np.float32)
-    ch, cw = im_h / out_hw[0], im_w / out_hw[1]
-    y[..., :4] /= [cw, ch, im_w, im_h]
+    y[..., :2] *= [out_hw[1], out_hw[0]]
     xy, cr = np.modf(y[..., :2])
     # when 2+ objects in the same cell match the same prior, assign the larger object and shift the other
-    crb = np.concatenate((cr, match_to_anchors(y[..., :4], anchors).reshape((1, -1, 1))), axis=-1).astype(np.uint8)  # batch x N x 3
+    crb = np.concatenate((cr, match_to_anchors(y[..., :4].copy(), anchors).reshape((1, -1, 1))), axis=-1).astype(np.uint8)  # batch x N x 3
     _, dup_idx = np.unique(crb, axis=-1, return_inverse=True)  # (batch_idx, n_idx)
     if np.ndarray(dup_idx).any():
         print("2 objects matched the same cell prior")
         crb = shift_duplicates(crb, dup_idx, num_boxes, y)
     c, r, b = crb[..., 0], crb[..., 1], crb[..., 2]
-    xy[xy == 0] = 1/max(cw, ch)
+    xy[xy == 0] = 1 / 7680  # ln(0) is undefined and will introduce NANs, setting this to a very low value is effectively ln(0) but is defined
     y[..., :2] = np.log(xy/(1-xy))
     y[..., 2:4] /= anchors[b]
     y[..., 2:4] = np.log(y[..., 2:4])
@@ -418,12 +395,9 @@ def match_to_anchors(xywh, anchors):
     return np.argmax(iou, axis=-1)  # batch x N
 
 
-def get_anchors(frames, num_clusters):
-
-    imgs, labels = zip(*frames)
-    _, im_height, im_width, *_ = imgs[0].shape
+def get_anchors(labels, num_clusters):
     labels = np.concatenate(labels, axis=1)
-    wh_data = labels.reshape((labels.shape[1], labels.shape[2]))[..., 2:4] / [im_width, im_height]
+    wh_data = labels.reshape((labels.shape[1], labels.shape[2]))[..., 2:4]
 
     def input_fn():
         return tf.compat.v1.train.limit_epochs(
