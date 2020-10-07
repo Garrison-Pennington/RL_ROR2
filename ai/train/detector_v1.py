@@ -18,7 +18,9 @@ model = net.compile_model(
 
 cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=str(Path.expanduser(Path("~/models/ror2_yolov3_v1"))),
                                                  save_weights_only=True,
-                                                 verbose=1)
+                                                 verbose=1,
+                                                 save_freq="epoch",
+                                                 period=10)
 
 try:
     model.fit(
