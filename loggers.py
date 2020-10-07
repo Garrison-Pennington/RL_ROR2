@@ -1,4 +1,5 @@
 from os import path, listdir
+from pathlib import Path
 import time
 from datetime import date
 import atexit
@@ -92,6 +93,7 @@ def start_logging(game):
     start_game(game)
     update_json(session_file, {"game start": time.time(), "game": game})
     start_recording()
+    time.sleep(1)
     update_json(session_file, {"recording start": get_obs_log_time()})
     # set exit handler to log session data
     print("registering exit handler")
@@ -101,10 +103,10 @@ def start_logging(game):
 
 
 def get_obs_log_time():
-    log_dir = path.expanduser("~/AppData/Roaming/obs-studio/logs")
-    files = listdir(log_dir)
-    files = list(filter(lambda nm: nm[:10].replace("-", "") == dt, files))
-    times = list(map(lambda nm: [int(el) for el in nm[11:21].split("-")], files))
+    log_dir = Path.expanduser(Path("~/AppData/Roaming/obs-studio/logs"))
+    files = list(filter(lambda p: p.is_file(), log_dir.glob("**/*")))
+    files = list(filter(lambda p: p.stem[:10].strip().replace("-", "") == dt, files))
+    times = list(map(lambda p: [int(el) for el in p.stem[10:].strip().split("-")], files))
     t = time_list()
     times = list(map(lambda tl: tl[0] - t[0] * (60 * 60) + tl[1] - t[1] * 60 + tl[2] - t[2], times))
     idx = times.index(min(times))
@@ -112,7 +114,7 @@ def get_obs_log_time():
     while not rec_time:
         with open(files[idx], "r") as f:
             lines = f.readlines()
-            target = filter(lambda txt: "Recording Start" in txt, lines)
+            target = list(filter(lambda txt: "Recording Start" in txt, lines))[0]
             if target:
                 rec_time = target[:12]
             else:
