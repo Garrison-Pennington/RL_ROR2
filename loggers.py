@@ -114,9 +114,9 @@ def get_obs_log_time():
     while not rec_time:
         with open(files[idx], "r") as f:
             lines = f.readlines()
-            target = list(filter(lambda txt: "Recording Start" in txt, lines))[0]
+            target = list(filter(lambda txt: "Recording Start" in txt, lines))
             if target:
-                rec_time = target[:12]
+                rec_time = target[0][:12]
             else:
                 time.sleep(.5)
     ms = int(rec_time[-3:]) / 1000
