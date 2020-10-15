@@ -84,7 +84,7 @@ class YOLOv3:
 
     """
 
-    def __init__(self, input_shape, num_classes, num_boxes, num_scales=4, extra_ds=0):
+    def __init__(self, input_shape, num_classes, num_boxes, num_scales=3, extra_ds=1):
         """
 
         :param self:
@@ -92,10 +92,10 @@ class YOLOv3:
         :return: S x S x (num_boxes * (num_classes + 4 offsets + 1 confidence))
         """
         inputs = tf.keras.Input(input_shape)
-        model = models.Model(inputs=inputs, outputs=darknet_body(inputs, num_scales + 2, 1024))
+        model = models.Model(inputs=inputs, outputs=darknet_body(inputs, num_scales + extra_ds + 2, 1024))
         x, y1 = make_last_layers(model.output, 1024, num_boxes*(num_classes + 5))
         outputs = [y1]
-        for s in range(num_scales - 1)[::-1]:
+        for s in range(num_scales + extra_ds - 1)[::-1]:
             x, y = output_block(x, model.layers[60 * s + 92].output, 64 * (2 ** s), num_boxes*(num_classes + 5))
             outputs.append(y)
         if extra_ds:
